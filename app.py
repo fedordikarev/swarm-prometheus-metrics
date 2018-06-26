@@ -7,10 +7,17 @@ from flask import Response
 import docker
 import requests
 
+import asyncio
+from aiohttp import ClientSession
+
 app = Flask(__name__)
 
 SELF_DOCKER_ID = None
 DOCKER_HOST_NAME = None
+
+async def fetch(url, to_extend, session):
+    async with session.get(url) as response:
+        return extend_metrics(await response.read(), to_extend)
 
 def extend_metrics(text, to_extend):
     """ Add extra labels to metrics """
@@ -30,6 +37,15 @@ def extend_metrics(text, to_extend):
         else:
             output.append(key+"{"+to_extend+"} "+value)
     return "\n".join(output)
+
+async def get_result(targets):
+    async with ClientSession() as session:
+        for (url, to_extend) in targets.items():
+            task = asyncio.ensure_future(fetch(url, to_extend, session))
+            tasks.append(task)
+
+    responses = await asyncio.gather(*tasks)
+    return responses
 
 @app.route("/metrics_all")
 def main():
@@ -63,17 +79,12 @@ def main():
 
         targets[url] = to_extend
 
-    for (url, to_extend) in targets.items():
-        try:
-            r = requests.get(url, timeout=1)
-            if r.status_code != 200:
-                continue
-            if r.text:
-                result.append(extend_metrics(r.text, to_extend)+"\n")
-        except:
-            pass
+    print("DEBUG2: ", targets)
+    loop = asyncio.get_event_loop()
+    future = asyncio.ensure_future(get_result(targets))
+    responses = loop.run_until_complete(future)
 
-    return Response("".join(result), mimetype='text/plain')
+    return Response("".join(responses), mimetype='text/plain')
 
 if __name__ == "__main__":
     with open("/proc/1/cpuset", "r") as f:

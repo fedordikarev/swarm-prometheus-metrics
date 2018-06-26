@@ -1,7 +1,7 @@
 #!/usr/bin/env python
+""" Collect Prometheus metrics from containers and add labels to them """
 
 from flask import Flask
-from flask import jsonify
 from flask import Response
 
 import docker
@@ -13,6 +13,7 @@ SELF_DOCKER_ID = None
 DOCKER_HOST_NAME = None
 
 def extend_metrics(text, to_extend):
+    """ Add extra labels to metrics """
     output = []
     for line in text.splitlines():
         if line.startswith("#"):
@@ -32,7 +33,8 @@ def extend_metrics(text, to_extend):
 
 @app.route("/metrics_all")
 def main():
-    d = docker.from_env()
+    """ Collect all metrics """
+    d = docker.from_env(timeout=1)
 
     result = []
     try:
@@ -40,8 +42,9 @@ def main():
     except:
         return ""
 
+    # Prepate targets for async loop
+    targets = {}
     for (k, v) in n.attrs['Containers'].items():
-        print("DEBUG", k, v)
         if k == SELF_DOCKER_ID:
             continue
         try:
@@ -51,21 +54,24 @@ def main():
         except:
             print("fail get ", k)
             continue
+        url = "http://{}:{}/metrics".format(ip, port)
+
+        to_extend = 'node_name="{}",container="{}"'.format(DOCKER_HOST_NAME, c.attrs['Name'])
+        if "com.docker.swarm.service.name" in c.attrs["Config"]["Labels"]:
+            to_extend += ',service="{}"'.format(
+                c.attrs["Config"]["Labels"]["com.docker.swarm.service.name"])
+
+        targets[url] = to_extend
+
+    for (url, to_extend) in targets.items():
         try:
-            r = requests.get("http://{}:{}/metrics".format(ip, port), timeout=10)
+            r = requests.get(url, timeout=1)
             if r.status_code != 200:
                 continue
-            # print(r.text)
-            to_extend = 'node_name="{}",container="{}"'.format(DOCKER_HOST_NAME, c.attrs['Name'])
-            if "com.docker.swarm.service.name" in c.attrs["Config"]["Labels"]:
-                to_extend += ',service="{}"'.format(c.attrs["Config"]["Labels"]["com.docker.swarm.service.name"])
             if r.text:
                 result.append(extend_metrics(r.text, to_extend)+"\n")
-            # result.append({c.attrs['Name']: extend_metrics(r.text, to_extend)})
-            # result.append({c.attrs['Name']: "http://{}:{}/metrics".format(ip, port)})
-            # return json.dumps(result)
         except:
-            print(c.attrs['Name'], "no metrics")
+            pass
 
     return Response("".join(result), mimetype='text/plain')
 

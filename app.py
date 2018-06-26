@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """ Collect Prometheus metrics from containers and add labels to them """
 
-from flask import Flask
-from flask import Response
+from quart import Quart
+from quart import Response
 
 import docker
 import requests
@@ -10,7 +10,7 @@ import requests
 import asyncio
 from aiohttp import ClientSession
 
-app = Flask(__name__)
+app = Quart(__name__)
 
 SELF_DOCKER_ID = None
 DOCKER_HOST_NAME = None
@@ -39,6 +39,7 @@ def extend_metrics(text, to_extend):
     return "\n".join(output)
 
 async def get_result(targets):
+    tasks = []
     async with ClientSession() as session:
         for (url, to_extend) in targets.items():
             task = asyncio.ensure_future(fetch(url, to_extend, session))

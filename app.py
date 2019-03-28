@@ -34,10 +34,20 @@ def extend_metrics(text, to_extend):
             output.append(key+"{"+to_extend+"} "+value)
     return "\n".join(output)
 
+@app.route("/healthcheck")
+def healthcheck():
+    """ Healthcheck """
+    d = docker.from_env(timeout=1)  #pylint: disable=invalid-name
+
+    if d:
+        return "OK"
+    else:
+        return 500, "Docker fail"
+
 @app.route("/metrics_all")
 def main():
     """ Collect all metrics """
-    d = docker.from_env(timeout=1)  #pylint: disable=invalid-name
+    d = docker.from_env(timeout=2)  #pylint: disable=invalid-name
 
     result = []
     n = None    #pylint: disable=invalid-name
@@ -54,6 +64,9 @@ def main():
 
     # Prepate targets for async loop
     targets = {}
+    if not n.attrs.get('Containers'):
+        return Response("", mimetype='text/plain')
+
     for (k, v) in n.attrs['Containers'].items():    #pylint: disable=invalid-name
         if k == SELF_DOCKER_ID:
             continue
@@ -79,7 +92,7 @@ def main():
            )
     for (url, to_extend) in targets.items():
         try:
-            r = s.get(url, timeout=0.05)    #pylint: disable=invalid-name
+            r = s.get(url, timeout=2.0)    #pylint: disable=invalid-name
             if r.status_code != 200:
                 continue
             if r.text:
